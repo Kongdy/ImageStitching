@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/ImageStitching.iml" filepath="$PROJECT_DIR$/ImageStitching.iml" />
+      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/imagestitchinglib/imagestitchinglib.iml" filepath="$PROJECT_DIR$/imagestitchinglib/imagestitchinglib.iml" />
+    </modules>
+  </component>
+</project>
