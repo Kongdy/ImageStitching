@@ -28,7 +28,7 @@ class MainActivity : AppCompatActivity(),ImageStitchingView.OnGenerateBitmapList
         if(!imgFie.exists())
             imgFie.createNewFile()
 
-        var fos = FileOutputStream(imgFie)
+        val fos = FileOutputStream(imgFie)
         bitmap?.compress(Bitmap.CompressFormat.PNG,90,fos)
         fos.flush()
         fos.close()
