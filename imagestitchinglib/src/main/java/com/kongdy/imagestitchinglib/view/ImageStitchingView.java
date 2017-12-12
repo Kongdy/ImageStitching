@@ -5,23 +5,21 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.graphics.Shader;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
-
-import com.kongdy.imagestitchinglib.util.BitmapUtils;
+import android.view.ViewConfiguration;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,18 +35,33 @@ public class ImageStitchingView extends View {
     private final static int BITMAP_GENERATE_RESULT = 0x000001;
     private final static int BITMAP_GENERATE_ERROR = 0x000002;
     private final static String BITMAP_ERROR = "bitmapError";
+    /**
+     * 正在执行动画
+     */
+    private final static int VIEW_MODE_RUN_ANIMATION = 0x000003;
+    /**
+     * 正在控制图片
+     */
+    private final static int VIEW_MODE_ON_CONTROL_IMG = 0x000004;
+    /**
+     * 空闲状态
+     */
+    private final static int VIEW_MODE_IDLE = 0x000005;
 
     private Paint stitchingPaint;
-    private Paint generationPaint;
     private Paint framePaint;
 
     private Rect clipScope = new Rect();
 
     private List<ImageData> imgList = new ArrayList<>();
-    private boolean isOnAnimationStatus = false;
     private Bitmap outputBitmap;
 
     private OnGenerateBitmapListener onGenerateBitmapListener;
+    // 触摸是否在对视图进行控制
+    private int mViewMode = VIEW_MODE_IDLE;
+
+    private int mTouchSlop;
+    private int findIndex = -1;
 
     private Thread handleBitmapThread = new Thread(new Runnable() {
         @Override
@@ -104,15 +117,25 @@ public class ImageStitchingView extends View {
     public ImageStitchingView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
 
+        initProperty();
+        applyAttr(attrs);
+    }
+
+    private void initProperty() {
         stitchingPaint = new Paint();
-        generationPaint = new Paint();
         framePaint = new Paint();
 
         framePaint.setStyle(Paint.Style.FILL_AND_STROKE);
 
         initPaintProperty(stitchingPaint);
-        initPaintProperty(generationPaint);
         initPaintProperty(framePaint);
+
+        final ViewConfiguration viewConfiguration = ViewConfiguration.get(getContext());
+        mTouchSlop = viewConfiguration.getScaledTouchSlop();
+    }
+
+    private void applyAttr(AttributeSet attrs) {
+
     }
 
     private void initPaintProperty(Paint paint) {
@@ -195,7 +218,7 @@ public class ImageStitchingView extends View {
         super.onLayout(changed, left, top, right, bottom);
         // measure child layout
         int cursorTop = top;
-        int mid = (right - left) / 2;
+        int mid = (right - left) >> 1;
         for (int i = 0; i < imgList.size(); i++) {
             final ImageData imageData = imgList.get(i);
 
@@ -222,6 +245,45 @@ public class ImageStitchingView extends View {
         canvas.restore();
     }
 
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        // 分发各个img的触摸事件
+        if (mViewMode != VIEW_MODE_IDLE && findIndex >= 0){
+            imgList.get(findIndex).onTouchEvent(event);
+            return true;
+        }
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                // 判断落点是否在img中
+                if (mViewMode == VIEW_MODE_IDLE) {
+                    findIndex = findTouchImg(event);
+                    if (findIndex >= 0)
+                        imgList.get(findIndex).onTouchEvent(event);
+                }
+                break;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    /**
+     * @return -1 is not find
+     */
+    private int findTouchImg(MotionEvent event) {
+        final float touchX = event.getRawX();
+        final float touchY = event.getRawY();
+        for (int i = 0; i < imgList.size(); i++) {
+            ImageData imageData = imgList.get(i);
+            if (imageData.drawRect.contains(touchX, touchY)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    protected void requestDisallowInterceptTouchEvent(boolean flag) {
+        this.mViewMode = flag ? VIEW_MODE_ON_CONTROL_IMG : VIEW_MODE_IDLE;
+    }
+
     private void drawFrame(Canvas canvas) {
         canvas.drawRect(clipScope, framePaint);
     }
@@ -235,11 +297,10 @@ public class ImageStitchingView extends View {
         }
     }
 
-
     public void rotateImage(float angle, int pos) {
         if (!checkSafe(pos))
             return;
-        isOnAnimationStatus = true;
+        mViewMode = VIEW_MODE_RUN_ANIMATION;
         final ImageData imageData = imgList.get(pos);
         ValueAnimator valueAnimator = ValueAnimator.ofFloat(imageData.rotateAngle, imageData.rotateAngle + angle);
         valueAnimator.setDuration(DEFAULT_ANIMATION_TIME);
@@ -253,7 +314,7 @@ public class ImageStitchingView extends View {
         valueAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
-                isOnAnimationStatus = false;
+                mViewMode = VIEW_MODE_IDLE;
             }
         });
         valueAnimator.start();
@@ -262,7 +323,7 @@ public class ImageStitchingView extends View {
     public void scaleImage(float scale, int pos) {
         if (!checkSafe(pos))
             return;
-        isOnAnimationStatus = true;
+        mViewMode = VIEW_MODE_RUN_ANIMATION;
         final ImageData imageData = imgList.get(pos);
         ValueAnimator valueAnimator = ValueAnimator.ofFloat(imageData.scale, scale);
         valueAnimator.setDuration(DEFAULT_ANIMATION_TIME);
@@ -276,7 +337,7 @@ public class ImageStitchingView extends View {
         valueAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
-                isOnAnimationStatus = false;
+                mViewMode = VIEW_MODE_IDLE;
             }
         });
         valueAnimator.start();
@@ -285,7 +346,7 @@ public class ImageStitchingView extends View {
     private boolean checkSafe(int pos) {
         if (pos >= imgList.size() || pos < 0)
             return false;
-        if (isOnAnimationStatus)
+        if (mViewMode != VIEW_MODE_IDLE)
             return false;
         return true;
     }
@@ -353,18 +414,13 @@ public class ImageStitchingView extends View {
         float scale = 0f;
         // 0点在3点钟方向，达到垂直居中的效果，需要置为-90度
         float rotateAngle = -90f;
-        private BitmapShader bitmapShader;
         RectF drawRect = new RectF();
         RectF orgRect = new RectF();
         Bitmap bitmap;
         Matrix matrix;
 
-        BitmapShader getShader() {
-            if (null == bitmapShader)
-                bitmapShader = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            bitmapShader.setLocalMatrix(matrix);
-            return bitmapShader;
-        }
+        private float distanceStub = 0f;
+        private float angleStub = 0f;
 
         public Bitmap getBitmap() {
             return bitmap;
@@ -393,12 +449,64 @@ public class ImageStitchingView extends View {
             float scaleWidth = ((float) w) / orgWidth;
             float scaleHeight = ((float) h) / orgHeight;
             scale = (scaleWidth + scaleHeight) * 0.5f;
-            matrix.setScale(scaleWidth, scaleHeight);
-            matrix = BitmapUtils.resetBitmapSize(bitmap, matrix, w, h);
+            matrix.postScale(scale, scale);
         }
 
         void clearMatrixCache() {
             matrix.reset();
+        }
+
+        /**
+         * imageData的触摸处理事件
+         *
+         * @param e 触摸事件
+         */
+        protected void onTouchEvent(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    requestDisallowInterceptTouchEvent(true);
+                    distanceStub = getPointDistance(e);
+                    angleStub = getPointAngle(e);
+                case MotionEvent.ACTION_MOVE:
+                    // confirm multi touch
+                    float tempDistance = getPointDistance(e);
+                    float tempAngle = getPointAngle(e);
+                //    if (Math.abs(tempDistance - distanceStub) > mTouchSlop) {
+                        this.scale += (tempDistance / distanceStub) - 1;
+              //      }
+                    this.rotateAngle += tempAngle - angleStub;
+                    angleStub = tempAngle;
+                    reDraw();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    distanceStub = 0;
+                    angleStub = 0;
+                    findIndex = -1;
+                    requestDisallowInterceptTouchEvent(false);
+                    break;
+            }
+        }
+
+        private float getPointDistance(MotionEvent e) {
+            if (e.getPointerCount() > 1) {
+                final float touchX1 = e.getX(0);
+                final float touchY1 = e.getY(0);
+                final float touchX2 = e.getX(1);
+                final float touchY2 = e.getY(1);
+                return (float) Math.abs(Math.sqrt(Math.pow(touchX2 - touchX1, 2) + Math.pow(touchY2 - touchY1, 2)));
+            }
+            return 0;
+        }
+
+        private float getPointAngle(MotionEvent e) {
+            if (e.getPointerCount() > 1) {
+                final float touchX1 = e.getX(0);
+                final float touchY1 = e.getY(0);
+                final float touchX2 = e.getX(1);
+                final float touchY2 = e.getY(1);
+                return (float) Math.atan2(touchX2 - touchX1, touchY2 - touchY1);
+            }
+            return 0;
         }
     }
 

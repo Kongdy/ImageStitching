@@ -25,7 +25,7 @@ public class BitmapUtils {
         // 计算缩放比例
         float scaleWidth = ((float) width) / orgWidth;
         float scaleHeight = ((float) height) / orgHeight;
-        matrix.setScale(scaleWidth, scaleHeight);
+        matrix.postScale(scaleWidth, scaleHeight);
         return matrix;
     }
 
