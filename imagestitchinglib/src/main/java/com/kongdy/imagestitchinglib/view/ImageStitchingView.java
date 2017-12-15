@@ -6,7 +6,6 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
@@ -19,7 +18,6 @@ import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewConfiguration;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,7 +58,6 @@ public class ImageStitchingView extends View {
     // 触摸是否在对视图进行控制
     private int mViewMode = VIEW_MODE_IDLE;
 
-    private int mTouchSlop;
     private int findIndex = -1;
 
     private Thread handleBitmapThread = new Thread(new Runnable() {
@@ -130,12 +127,9 @@ public class ImageStitchingView extends View {
         initPaintProperty(stitchingPaint);
         initPaintProperty(framePaint);
 
-        final ViewConfiguration viewConfiguration = ViewConfiguration.get(getContext());
-        mTouchSlop = viewConfiguration.getScaledTouchSlop();
     }
 
     private void applyAttr(AttributeSet attrs) {
-
     }
 
     private void initPaintProperty(Paint paint) {
@@ -248,29 +242,41 @@ public class ImageStitchingView extends View {
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
         // 分发各个img的触摸事件
-        if (mViewMode != VIEW_MODE_IDLE && findIndex >= 0){
+        if (mViewMode != VIEW_MODE_IDLE && findIndex >= 0) {
             imgList.get(findIndex).onTouchEvent(event);
             return true;
         }
-        switch (event.getAction()) {
+        switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                if (mViewMode == VIEW_MODE_IDLE) {
+                    findIndex = findTouchImg(event);
+                    if (findIndex >= 0) {
+                        return true;
+                    }
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
                 // 判断落点是否在img中
                 if (mViewMode == VIEW_MODE_IDLE) {
                     findIndex = findTouchImg(event);
-                    if (findIndex >= 0)
+                    if (findIndex >= 0) {
                         imgList.get(findIndex).onTouchEvent(event);
+                        if (getParent() != null)
+                            getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
                 }
                 break;
         }
-        return super.dispatchTouchEvent(event);
+        return false;
     }
 
     /**
      * @return -1 is not find
      */
     private int findTouchImg(MotionEvent event) {
-        final float touchX = event.getRawX();
-        final float touchY = event.getRawY();
+        final float touchX = event.getX();
+        final float touchY = event.getY();
         for (int i = 0; i < imgList.size(); i++) {
             ImageData imageData = imgList.get(i);
             if (imageData.drawRect.contains(touchX, touchY)) {
@@ -291,8 +297,6 @@ public class ImageStitchingView extends View {
     private void drawImg(Canvas canvas) {
         for (int i = 0; i < imgList.size(); i++) {
             final ImageData img = imgList.get(i);
-            framePaint.setColor(Color.RED);
-            canvas.drawRect(img.drawRect, framePaint);
             canvas.drawBitmap(img.getBitmap(), img.matrix, stitchingPaint);
         }
     }
@@ -343,6 +347,59 @@ public class ImageStitchingView extends View {
         valueAnimator.start();
     }
 
+    private void runAngleAdsorbentAnim(int pos) {
+        // force run animation
+        if (pos >= imgList.size() || pos < 0)
+            return;
+        mViewMode = VIEW_MODE_RUN_ANIMATION;
+        final ImageData imageData = imgList.get(pos);
+        /*
+          吸附运算方式:
+          e.g:
+
+          space = 100;
+          left point = 100;
+          right point = 200;
+
+          x = 161;
+          calc process:
+
+          161+50 = 211
+          211/100 = 2
+          2x100=200
+
+          x = 149
+          calc process:
+
+          149+50 = 199
+          199/100 = 1
+          1x100 = 100
+
+          为了保证运算方式的结果，
+          以int形式进行计算,运算
+          结果出来之后再转换为rate
+         */
+        final int adsorbentAngle = 90;
+        final int orgAngle = (int) imageData.rotateAngle;
+        int toAngle = ((orgAngle + (adsorbentAngle / 2)) / adsorbentAngle) * adsorbentAngle;
+        ValueAnimator valueAnimator = ValueAnimator.ofFloat(orgAngle, toAngle);
+        valueAnimator.setDuration(DEFAULT_ANIMATION_TIME);
+        valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                imageData.rotateAngle = (float) animation.getAnimatedValue();
+                reDraw();
+            }
+        });
+        valueAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mViewMode = VIEW_MODE_IDLE;
+            }
+        });
+        valueAnimator.start();
+    }
+
     private boolean checkSafe(int pos) {
         if (pos >= imgList.size() || pos < 0)
             return false;
@@ -355,7 +412,7 @@ public class ImageStitchingView extends View {
         if (null == bitmap)
             return;
         ImageData imageData = new ImageData(bitmap);
-        imageData.rotateAngle = (float) (10 * Math.random() * 90);
+        imageData.rotateAngle = (int) (10 * Math.random()) * 90;
         imgList.add(imageData);
         clearMatrixCache();
         post(new Runnable() {
@@ -456,6 +513,22 @@ public class ImageStitchingView extends View {
             matrix.reset();
         }
 
+        void setScale(float scale) {
+            this.scale = scale;
+        }
+
+        float getScale() {
+            return this.scale;
+        }
+
+        void setRotateAngle(float angle) {
+            this.rotateAngle = angle;
+        }
+
+        float getRotateAngle() {
+            return this.rotateAngle;
+        }
+
         /**
          * imageData的触摸处理事件
          *
@@ -464,25 +537,40 @@ public class ImageStitchingView extends View {
         protected void onTouchEvent(MotionEvent e) {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    break;
+                case MotionEvent.ACTION_POINTER_DOWN:
                     requestDisallowInterceptTouchEvent(true);
                     distanceStub = getPointDistance(e);
                     angleStub = getPointAngle(e);
+                    break;
                 case MotionEvent.ACTION_MOVE:
                     // confirm multi touch
-                    float tempDistance = getPointDistance(e);
-                    float tempAngle = getPointAngle(e);
-                //    if (Math.abs(tempDistance - distanceStub) > mTouchSlop) {
-                        this.scale += (tempDistance / distanceStub) - 1;
-              //      }
-                    this.rotateAngle += tempAngle - angleStub;
-                    angleStub = tempAngle;
-                    reDraw();
+                    if (e.getPointerCount() > 1) {
+                        float tempDistance = getPointDistance(e);
+                        float tempAngle = getPointAngle(e);
+                        float tempScale = this.getScale();
+                        float tempRotateAngle = this.getRotateAngle();
+
+                        tempScale += (tempDistance / distanceStub) - 1;
+                        tempRotateAngle += tempAngle - angleStub;
+
+                        angleStub = tempAngle;
+                        distanceStub = tempDistance;
+
+                        this.setRotateAngle(tempRotateAngle);
+                        this.setScale(tempScale);
+                        reDraw();
+                    }
                     break;
+                case MotionEvent.ACTION_CANCEL:
                 case MotionEvent.ACTION_UP:
+                    runAngleAdsorbentAnim(findIndex);
+                    requestDisallowInterceptTouchEvent(false);
+                    if (getParent() != null)
+                        getParent().requestDisallowInterceptTouchEvent(false);
                     distanceStub = 0;
                     angleStub = 0;
                     findIndex = -1;
-                    requestDisallowInterceptTouchEvent(false);
                     break;
             }
         }
@@ -504,7 +592,7 @@ public class ImageStitchingView extends View {
                 final float touchY1 = e.getY(0);
                 final float touchX2 = e.getX(1);
                 final float touchY2 = e.getY(1);
-                return (float) Math.atan2(touchX2 - touchX1, touchY2 - touchY1);
+                return (float) (Math.atan2(touchY2 - touchY1, touchX2 - touchX1) * (180f / Math.PI));
             }
             return 0;
         }
