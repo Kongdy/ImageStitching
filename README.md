@@ -26,6 +26,7 @@ preXXX()和postXXX()方法会牵扯到矩阵的前乘和后乘，如果了解了
 	&nbsp;&nbsp;第二个方法则是对于需要保存原始矩阵的情况下，会把原始矩阵的计算结果赋值到指定的矩阵中
 2. setRectToRect(src,des,stf)<br/>
 	&nbsp;&nbsp;这个方法相当于将原始矩阵填充到目标矩阵中，所以也就要求两个矩阵都是有值的。其中填充模式由第三个参数决定。
+
 	```java
 	    /**
          * 独立缩放X和Y，直到和src的rect和目标rect确切的匹配。这可能会改变原始rect的宽高比
@@ -45,6 +46,7 @@ preXXX()和postXXX()方法会牵扯到矩阵的前乘和后乘，如果了解了
          */
         END(3);
 	```
+
 3.  invert(inverse)<br/>
 	&nbsp;&nbsp;反转矩阵，可以应用到类似倒影一类的实现中
 4.  setPolyToPoly(src,srcIndex,dst,dstIndex,pointCount)
@@ -59,6 +61,7 @@ preXXX()和postXXX()方法会牵扯到矩阵的前乘和后乘，如果了解了
 其中不带on的方法都为调度方法，不可被重写，这些方法里面会把前期一些必要的数据准备出来，带on前缀的方法都是实际进行处理的方法。<br/>
 measure方法是测量控件大小的，layout是用来布局，根据measure测量的结果，把其中每个元素在其内部进行位置的计算。最后会执行的draw方法，draw也分为draw和onDraw，可以根据自己需求来改写对应的方法。<br/>
 其中，onMeasure的方法如下所示:<br/>
+
 ```java
  @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -134,6 +137,7 @@ measure方法是测量控件大小的，layout是用来布局，根据measure测
 <br/>
 所有影响尺寸计算相关的方法都会放到这个measure里面进行计算，比如scale和rotate，都会影响size大小。所以在这里计算完成后，好在layout中进行正确的布局。<br/>
 layout中的代码如下:<br/>
+
 ```java
    @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
