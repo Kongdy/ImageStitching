@@ -270,7 +270,7 @@ compile 'com.github.Kongdy:ImageStitching:v1.0.0'
 
 <br/>
 
-本文代码:https://github.com/Kongdy/ImageStitching[](https://github.com/Kongdy/ImageStitching)<br/>
-个人github地址:https://github.com/Kongdy[](https://github.com/Kongdy)<br/>
-个人掘金主页:https://juejin.im/user/595a64def265da6c2153545b[](https://juejin.im/user/595a64def265da6c2153545b)<br/>
-csdn主页:http://blog.csdn.net/qq_24859309[](http://blog.csdn.net/qq_24859309)<br/>
+本文代码:[https://github.com/Kongdy/ImageStitching](https://github.com/Kongdy/ImageStitching)<br/>
+个人github地址:[https://github.com/Kongdy](https://github.com/Kongdy)<br/>
+个人掘金主页:[https://juejin.im/user/595a64def265da6c2153545b](https://juejin.im/user/595a64def265da6c2153545b)<br/>
+csdn主页:[http://blog.csdn.net/qq_24859309](http://blog.csdn.net/qq_24859309)<br/>
