@@ -255,6 +255,258 @@ ImageData如下:<br/>
 那么我们来看看效果<br/>
 ![实现效果](https://user-gold-cdn.xitu.io/2017/12/21/160781ac0f425a10?w=332&h=588&f=gif&s=2493375)
 
+
+# android触摸机制
+首先，当用户点下屏幕的时候，Linux会将触摸包装成Event，然后InputReader会收到来自EventBus发送过来的Event，最后InputDispatcher分发给ViewRootImpl，ViewRootImpl再传递给DecorView，这最终才到达了我们的当前界面，接下来的传递如下图所示。
+
+![android触摸传递](https://user-gold-cdn.xitu.io/2017/12/29/160a184bcacb09bb?w=994&h=740&f=png&s=27295)
+
+<br/>图画的不好，水平有限，望见谅。
+
+# 事件分发
+
+<br/>那从这里我们就知道，我们要写的view，需要先从dispatchTouchEvent()里面分发触摸事件，然后再TouchEvent()里面进行事件的处理。以下是dispatchTouchEvent中的处理。
+
+```java
+ @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        // 分发各个img的触摸事件
+        if (mViewMode != VIEW_MODE_IDLE && findIndex >= 0) {
+            imgList.get(findIndex).onTouchEvent(event);
+            return true;
+        }
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (mViewMode == VIEW_MODE_IDLE) {
+                    findIndex = findTouchImg(event);
+                    if (findIndex >= 0) {
+                        return true;
+                    }
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                // 判断落点是否在img中
+                if (mViewMode == VIEW_MODE_IDLE) {
+                    findIndex = findTouchImg(event);
+                    if (findIndex >= 0) {
+                        imgList.get(findIndex).onTouchEvent(event);
+                        if (getParent() != null)
+                            getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
+                }
+                break;
+        }
+        return false;
+    }
+```
+
+<br/>这里使用getActionMask()是为了更好的处理多点触控。使用findTouchImg()方法，判断如果点落到图片区域就消费这次事件，但是，后续的触摸事件，父控件还是有可能拦截的，这次只是消费了这次按压触摸事件。如果是多点触控，就直接调用requestDisallowInterceptTouchEvent的方法，禁止父控件拦截子控件的后续事件，不过使用这个方法要记着后面释放。判断确实是多点触控之后，就直接在方法顶部执行Img的方法，避免下面不必要的判断。这里findTouchImg()方法主要是根据每个Img的DrawRect进行点的落位判定。方法如下
+
+```java
+	 /**
+     * @return -1 is not find
+     */
+    private int findTouchImg(MotionEvent event) {
+        final float touchX = event.getX();
+        final float touchY = event.getY();
+        for (int i = 0; i < imgList.size(); i++) {
+            ImageData imageData = imgList.get(i);
+            if (imageData.drawRect.contains(touchX, touchY)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+```
+
+# 触摸事件处理
+
+这里我们主要实现两种效果，缩放和旋转。我们把Img的touch处理封装到了ImageData里面，代码如下:
+
+```java
+    /**
+         * imageData的触摸处理事件
+         *
+         * @param e 触摸事件
+         */
+        protected void onTouchEvent(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    break;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    requestDisallowInterceptTouchEvent(true);
+                    distanceStub = getPointDistance(e);
+                    angleStub = getPointAngle(e);
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    // confirm multi touch
+                    if (e.getPointerCount() > 1) {
+                        float tempDistance = getPointDistance(e);
+                        float tempAngle = getPointAngle(e);
+                        float tempScale = this.getScale();
+                        float tempRotateAngle = this.getRotateAngle();
+
+                        tempScale += (tempDistance / distanceStub) - 1;
+                        tempRotateAngle += tempAngle - angleStub;
+
+                        angleStub = tempAngle;
+                        distanceStub = tempDistance;
+
+                        this.setRotateAngle(tempRotateAngle);
+                        this.setScale(tempScale);
+                        reDraw();
+                    }
+                    break;
+                case MotionEvent.ACTION_CANCEL:
+                case MotionEvent.ACTION_UP:
+                    runAngleAdsorbentAnim(findIndex);
+                    requestDisallowInterceptTouchEvent(false);
+                    if (getParent() != null)
+                        getParent().requestDisallowInterceptTouchEvent(false);
+                    distanceStub = 0;
+                    angleStub = 0;
+                    findIndex = -1;
+                    break;
+            }
+        }
+```
+
+<br/>当多点触控的时候，记录下最先两个触摸点的距离和斜率角度，在随后发生滑动的时候，计算与之前触摸点距离和斜率角度发生的变化，再对Bitmap进行即时调整。计算距离和斜率角度的方法如下:
+
+```java
+private float getPointDistance(MotionEvent e) {
+            if (e.getPointerCount() > 1) {
+                final float touchX1 = e.getX(0);
+                final float touchY1 = e.getY(0);
+                final float touchX2 = e.getX(1);
+                final float touchY2 = e.getY(1);
+                return (float) Math.abs(Math.sqrt(Math.pow(touchX2 - touchX1, 2) +
+                Math.pow(touchY2 - touchY1, 2)));
+            }
+            return 0;
+        }
+
+        private float getPointAngle(MotionEvent e) {
+            if (e.getPointerCount() > 1) {
+                final float touchX1 = e.getX(0);
+                final float touchY1 = e.getY(0);
+                final float touchX2 = e.getX(1);
+                final float touchY2 = e.getY(1);
+                return (float) (Math.atan2(touchY2 - touchY1, touchX2 - touchX1) * (180f
+                / Math.PI));
+            }
+            return 0;
+        }
+
+```
+
+<br/>计算两点距离很简单，中学的计算公式![两点之间求距离公式](https://user-gold-cdn.xitu.io/2017/12/29/160a184af9b40850?w=278&h=51&f=png&s=1712) 求两点相减的平方求根之后就是直线距离了。
+<br/>求斜率也是借助中学的计算公式![斜率公式](https://user-gold-cdn.xitu.io/2017/12/29/160a184afb7f976c?w=291&h=47&f=png&s=1844) 算出来斜率，不过此时的斜率不能直接计算，要转换成角度。而转换成角度，只需要乘以(180÷π)即可。
+
+<br/>那么我们求出角度和距离公式之后，只需要跟上一次记录的数据进行比对，即可改变数据。我们看看实现效果。
+
+![触摸效果](https://user-gold-cdn.xitu.io/2017/12/29/160a184bede740dc?w=332&h=588&f=gif&s=3045168)
+
+<br/>但是到这一步还没有完，我们还要加上吸附动画。
+
+# 动画
+
+我们先直接看看吸附动画的代码:
+
+```java
+ private void runAngleAdsorbentAnim(int pos) {
+        // force run animation
+        if (pos >= imgList.size() || pos < 0)
+            return;
+        mViewMode = VIEW_MODE_RUN_ANIMATION;
+        final ImageData imageData = imgList.get(pos);
+        /*
+          吸附运算方式:
+          e.g:
+
+          space = 100;
+          left point = 100;
+          right point = 200;
+
+          x = 161;
+          calc process:
+
+          161+50 = 211
+          211/100 = 2
+          2x100=200
+
+          x = 149
+          calc process:
+
+          149+50 = 199
+          199/100 = 1
+          1x100 = 100
+
+          为了保证运算方式的结果，
+          以int形式进行计算,运算
+          结果出来之后再转换为rate
+         */
+        final int adsorbentAngle = 90;
+        final int orgAngle = (int) imageData.rotateAngle;
+        int toAngle = ((orgAngle + (adsorbentAngle / 2)) / adsorbentAngle) * adsorbentAngle;
+        ValueAnimator valueAnimator = ValueAnimator.ofFloat(orgAngle, toAngle);
+        valueAnimator.setDuration(DEFAULT_ANIMATION_TIME);
+        valueAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                imageData.rotateAngle = (float) animation.getAnimatedValue();
+                reDraw();
+            }
+        });
+        valueAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mViewMode = VIEW_MODE_IDLE;
+            }
+        });
+        valueAnimator.start();
+    }
+```
+
+吸附的运算原理在注释中已经详细距离说明了。这里就不再解释了。传参进来一个img的坐标，使用ValueAnimator对其属性进行改变，调用reDraw()方法即可完成一帧的动画。
+<br/>最后再来看看添加完吸附动画之后的效果:
+
+![带有吸附效果的触摸实现](https://user-gold-cdn.xitu.io/2017/12/29/160a184b014f5840?w=332&h=588&f=gif&s=2052400)
+
+最后我们到这里基本的控制操作就完成了，还差最后一步，就是最终的图片拼接。
+
+# 图片拼接
+
+android的View给我们提供了getDrawingCache()方法来获得当前view的绘制界面，不过这个方法受很多因素影响，不能每次都可以调用成功，并且可能会发生不可预知的后续操作，开启DrawingCache会产生性能影响。所以我们自己创建一个Cavans，传给onDraw()方法，让其把当前最新的界面绘制到我们传给他的Cavans上面。代码如下:
+
+```java
+   private Thread handleBitmapThread = new Thread(new Runnable() {
+        @Override
+        public void run() {
+            try {
+                outputBitmap = Bitmap.createBitmap(getMeasuredWidth(),
+                        getMeasuredHeight(), Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(outputBitmap);
+                draw(canvas);
+                generateBitmapHandler.sendEmptyMessage(BITMAP_GENERATE_RESULT);
+            } catch (Exception e) {
+                // 扔到主线程抛出
+                Message message = new Message();
+                message.what = BITMAP_GENERATE_ERROR;
+                Bundle bundle = new Bundle();
+                bundle.putSerializable(BITMAP_ERROR, e);
+                message.setData(bundle);
+                generateBitmapHandler.sendMessage(message);
+            }
+        }
+    });
+```
+
+使用自己创建的Cavans还可以限定画布大小，达到裁剪的目的。onDraw()方法执行完成之后，界面绘制到了我们传递的Bitmap上面，就可以把Bitmap抛出给处理方法来实现显示或者存储等一系列操作。
+
+
+
 <br/>
 使用方法,跟目录gradle里面添加<br/>
 
@@ -277,4 +529,4 @@ compile 'com.github.Kongdy:ImageStitching:v1.0.0'
 本文代码:[https://github.com/Kongdy/ImageStitching](https://github.com/Kongdy/ImageStitching)<br/>
 个人github地址:[https://github.com/Kongdy](https://github.com/Kongdy)<br/>
 个人掘金主页:[https://juejin.im/user/595a64def265da6c2153545b](https://juejin.im/user/595a64def265da6c2153545b)<br/>
-csdn主页:[http://blog.csdn.net/qq_24859309](http://blog.csdn.net/qq_24859309)<br/>
+csdn主页:[http://blog.csdn.net/u014303003](http://blog.csdn.net/u014303003)<br/>
